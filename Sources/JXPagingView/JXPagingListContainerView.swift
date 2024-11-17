@@ -91,7 +91,9 @@ protocol JXPagingListContainerViewDelegate: NSObjectProtocol {
     func listContainerViewDidScroll(_ listContainerView: JXPagingListContainerView)
     func listContainerViewWillBeginDragging(_ listContainerView: JXPagingListContainerView)
     func listContainerViewDidEndScrolling(_ listContainerView: JXPagingListContainerView)
-    func listContainerView(_ listContainerView: JXPagingListContainerView, listDidAppearAt index: Int)
+    func listContainerView(_ listContainerView: JXPagingListContainerView, list: JXPagingViewListViewDelegate, willAppearAt index: Int)
+    func listContainerView(_ listContainerView: JXPagingListContainerView, list: JXPagingViewListViewDelegate, didAppearAt index: Int)
+    func listContainerView(_ listContainerView: JXPagingListContainerView, panGestureRecognizerShouldBegin gestureRecognizer: UIPanGestureRecognizer) -> Bool
 }
 
 extension JXPagingListContainerViewDelegate {
@@ -99,7 +101,9 @@ extension JXPagingListContainerViewDelegate {
     func listContainerViewDidScroll(_ listContainerView: JXPagingListContainerView) {}
     func listContainerViewWillBeginDragging(_ listContainerView: JXPagingListContainerView) {}
     func listContainerViewDidEndScrolling(_ listContainerView: JXPagingListContainerView) {}
-    func listContainerView(_ listContainerView: JXPagingListContainerView, listDidAppearAt index: Int) {}
+    func listContainerView(_ listContainerView: JXPagingListContainerView, list: JXPagingViewListViewDelegate, willAppearAt index: Int) {}
+    func listContainerView(_ listContainerView: JXPagingListContainerView, list: JXPagingViewListViewDelegate, didAppearAt index: Int) {}
+    func listContainerView(_ listContainerView: JXPagingListContainerView, panGestureRecognizerShouldBegin gestureRecognizer: UIPanGestureRecognizer) -> Bool { true }
 }
 
 open class JXPagingListContainerView: UIView {
@@ -172,7 +176,9 @@ open class JXPagingListContainerView: UIView {
             if let scrollViewClass = dataSource.scrollViewClass(in: self) as? UIScrollView.Type {
                 scrollView = scrollViewClass.init()
             }else {
-                scrollView = JXPagingListContainerScrollView.init()
+                let jxScrollView = JXPagingListContainerScrollView.init()
+                jxScrollView.gestureDelegate = self
+                scrollView = jxScrollView
             }
             scrollView.backgroundColor = .clear
             scrollView.delegate = self
@@ -193,7 +199,9 @@ open class JXPagingListContainerView: UIView {
             if let collectionViewClass = dataSource.scrollViewClass(in: self) as? UICollectionView.Type {
                 collectionView = collectionViewClass.init(frame: CGRect.zero, collectionViewLayout: layout)
             }else {
-                collectionView = JXPagingListContainerCollectionView.init(frame: CGRect.zero, collectionViewLayout: layout)
+                let jxCollectionView = JXPagingListContainerCollectionView.init(frame: CGRect.zero, collectionViewLayout: layout)
+                jxCollectionView.gestureDelegate = self
+                collectionView = jxCollectionView
             }
             collectionView.backgroundColor = .clear
             collectionView.isPagingEnabled = true
@@ -340,8 +348,9 @@ open class JXPagingListContainerView: UIView {
             return
         }
         var existedList = validListDict[index]
-        if existedList != nil {
-            existedList?.listWillAppear()
+        if let existedList {
+            delegate?.listContainerView(self, list: existedList, willAppearAt: index)
+            existedList.listWillAppear()
             if let vc = existedList as? UIViewController {
                 vc.beginAppearanceTransition(true, animated: false)
             }
@@ -363,6 +372,7 @@ open class JXPagingListContainerView: UIView {
                     list.listView().frame = CGRect(x: CGFloat(index)*scrollView.bounds.size.width, y: 0, width: scrollView.bounds.size.width, height: scrollView.bounds.size.height)
                     scrollView.addSubview(list.listView())
                 }
+                delegate?.listContainerView(self, list: list, willAppearAt: index)
                 list.listWillAppear()
                 if let vc = list as? UIViewController {
                     vc.beginAppearanceTransition(true, animated: false)
@@ -372,6 +382,7 @@ open class JXPagingListContainerView: UIView {
                 cell?.contentView.subviews.forEach { $0.removeFromSuperview() }
                 list.listView().frame = cell?.contentView.bounds ?? CGRect.zero
                 cell?.contentView.addSubview(list.listView())
+                delegate?.listContainerView(self, list: list, willAppearAt: index)
                 list.listWillAppear()
                 if let vc = list as? UIViewController {
                     vc.beginAppearanceTransition(true, animated: false)
@@ -385,12 +396,13 @@ open class JXPagingListContainerView: UIView {
             return
         }
         currentIndex = index
-        let list = validListDict[index]
-        list?.listDidAppear()
-        if let vc = list as? UIViewController {
-            vc.endAppearanceTransition()
+        if let list = validListDict[index] {
+            list.listDidAppear()
+            if let vc = list as? UIViewController {
+                vc.endAppearanceTransition()
+            }
+            delegate?.listContainerView(self, list: list, didAppearAt: index)
         }
-        delegate?.listContainerView(self, listDidAppearAt: index)
     }
 
     private func listWillDisappear(at index: Int) {
@@ -468,6 +480,8 @@ extension JXPagingListContainerView: UICollectionViewDataSource, UICollectionVie
                 list?.listView().frame = cell.bounds
             }
             cell.contentView.addSubview(list!.listView())
+        } else {
+            print("***** cell for row no cache *****")
         }
         return cell
     }
@@ -551,6 +565,12 @@ extension JXPagingListContainerView: UICollectionViewDataSource, UICollectionVie
     }
 }
 
+extension JXPagingListContainerView: JXPagingListContainerGestureDelegate {
+    func panGestureRecognizerShouldBegin(_ gestureRecognizer: UIPanGestureRecognizer) -> Bool {
+        delegate?.listContainerView(self, panGestureRecognizerShouldBegin: gestureRecognizer) ?? true
+    }
+}
+
 class JXPagingListContainerViewController: UIViewController {
     var viewWillAppearClosure: (()->())?
     var viewDidAppearClosure: (()->())?
@@ -575,42 +595,75 @@ class JXPagingListContainerViewController: UIViewController {
     }
 }
 
+protocol JXPagingListContainerGestureDelegate: AnyObject {
+    func panGestureRecognizerShouldBegin(_ gestureRecognizer: UIPanGestureRecognizer) -> Bool
+}
+
+extension JXPagingListContainerGestureDelegate {
+    func panGestureRecognizerShouldBegin(_ gestureRecognizer: UIPanGestureRecognizer) -> Bool { true }
+}
+
 class JXPagingListContainerScrollView: UIScrollView, UIGestureRecognizerDelegate {
+    
     var isCategoryNestPagingEnabled = false
+    
+    weak var gestureDelegate: JXPagingListContainerGestureDelegate?
+    
     override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-        if isCategoryNestPagingEnabled, let panGestureClass = NSClassFromString("UIScrollViewPanGestureRecognizer"), gestureRecognizer.isMember(of: panGestureClass) {
-            let panGesture = gestureRecognizer as! UIPanGestureRecognizer
-            let velocityX = panGesture.velocity(in: panGesture.view!).x
-            if velocityX > 0 {
-                //当前在第一个页面，且往左滑动，就放弃该手势响应，让外层接收，达到多个PagingView左右切换效果
-                if contentOffset.x == 0 {
-                    return false
-                }
-            }else if velocityX < 0 {
-                //当前在最后一个页面，且往右滑动，就放弃该手势响应，让外层接收，达到多个PagingView左右切换效果
-                if contentOffset.x + bounds.size.width == contentSize.width {
-                    return false
+        if let panGestureClass = NSClassFromString("UIScrollViewPanGestureRecognizer"), gestureRecognizer.isMember(of: panGestureClass),
+           let panGesture = gestureRecognizer as? UIPanGestureRecognizer {
+            
+            if let gestureDelegate, !gestureDelegate.panGestureRecognizerShouldBegin(panGesture) {
+                return false
+            }
+            
+            if isCategoryNestPagingEnabled {
+                let panGesture = gestureRecognizer as! UIPanGestureRecognizer
+                let velocityX = panGesture.velocity(in: panGesture.view!).x
+                if velocityX > 0 {
+                    //当前在第一个页面，且往左滑动，就放弃该手势响应，让外层接收，达到多个PagingView左右切换效果
+                    if contentOffset.x == 0 {
+                        return false
+                    }
+                }else if velocityX < 0 {
+                    //当前在最后一个页面，且往右滑动，就放弃该手势响应，让外层接收，达到多个PagingView左右切换效果
+                    if contentOffset.x + bounds.size.width == contentSize.width {
+                        return false
+                    }
                 }
             }
         }
         return true
     }
 }
+
 class JXPagingListContainerCollectionView: UICollectionView, UIGestureRecognizerDelegate {
+    
     var isCategoryNestPagingEnabled = false
+    
+    weak var gestureDelegate: JXPagingListContainerGestureDelegate?
+    
     override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-        if isCategoryNestPagingEnabled, let panGestureClass = NSClassFromString("UIScrollViewPanGestureRecognizer"), gestureRecognizer.isMember(of: panGestureClass)  {
-            let panGesture = gestureRecognizer as! UIPanGestureRecognizer
-            let velocityX = panGesture.velocity(in: panGesture.view!).x
-            if velocityX > 0 {
-                //当前在第一个页面，且往左滑动，就放弃该手势响应，让外层接收，达到多个PagingView左右切换效果
-                if contentOffset.x == 0 {
-                    return false
-                }
-            }else if velocityX < 0 {
-                //当前在最后一个页面，且往右滑动，就放弃该手势响应，让外层接收，达到多个PagingView左右切换效果
-                if contentOffset.x + bounds.size.width == contentSize.width {
-                    return false
+        
+        if let panGestureClass = NSClassFromString("UIScrollViewPanGestureRecognizer"), gestureRecognizer.isMember(of: panGestureClass),
+           let panGesture = gestureRecognizer as? UIPanGestureRecognizer {
+            
+            if let gestureDelegate, !gestureDelegate.panGestureRecognizerShouldBegin(panGesture) {
+                return false
+            }
+            
+            if isCategoryNestPagingEnabled  {
+                let velocityX = panGesture.velocity(in: panGesture.view!).x
+                if velocityX > 0 {
+                    //当前在第一个页面，且往左滑动，就放弃该手势响应，让外层接收，达到多个PagingView左右切换效果
+                    if contentOffset.x == 0 {
+                        return false
+                    }
+                }else if velocityX < 0 {
+                    //当前在最后一个页面，且往右滑动，就放弃该手势响应，让外层接收，达到多个PagingView左右切换效果
+                    if contentOffset.x + bounds.size.width == contentSize.width {
+                        return false
+                    }
                 }
             }
         }
